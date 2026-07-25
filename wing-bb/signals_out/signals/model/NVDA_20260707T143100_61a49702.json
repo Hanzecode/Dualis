@@ -1,0 +1,8 @@
+{
+  "symbol": "NVDA",
+  "signal": -0.5,
+  "confidence": 0.625,
+  "target_qty": 250,
+  "limit_price_bps": 0,
+  "generated_at": "2026-07-07T14:30:55.543809Z"
+}

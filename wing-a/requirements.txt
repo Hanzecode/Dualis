@@ -1,0 +1,41 @@
+# wing_a/requirements.txt
+# ─────────────────────────────────────────────────────────────────────────────
+#  WING A PYTHON DEPENDENCIES
+#  Install: pip install -r requirements.txt
+#  Python >= 3.11 required (match Wing B for consistency)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── ZeroMQ — messaging between Python and C++ engine ─────────────────────────
+pyzmq==26.0.3
+
+# ── AWS SDK — S3 signal file polling, Secrets Manager ────────────────────────
+boto3==1.34.69
+botocore==1.34.69
+
+# ── WebSocket client — Alpaca market data feed ────────────────────────────────
+websocket-client==1.8.0
+
+# ── Database — TimescaleDB (PostgreSQL) persistence ───────────────────────────
+psycopg2-binary==2.9.9          # Binary wheel — no libpq-dev needed at runtime
+
+# ── .env file loading — config/settings.py reads secrets/overrides from .env ──
+python-dotenv==1.0.1
+
+# ── FastAPI dashboard backend ─────────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0       # [standard] includes websockets and httptools
+websockets==12.0                # Required by uvicorn for WS support
+
+# ── Numerics — position sizing, vol estimation ────────────────────────────────
+numpy==1.26.4
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+python-json-logger==2.0.7       # Structured JSON log lines for CloudWatch
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.2.0
+pytest-asyncio==0.23.6          # async test support for FastAPI tests
+
+# ── Dev / type checking (not installed in prod) ───────────────────────────────
+# mypy==1.10.0
+# ruff==0.4.4

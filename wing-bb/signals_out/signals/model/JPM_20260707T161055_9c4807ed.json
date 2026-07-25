@@ -1,0 +1,8 @@
+{
+  "symbol": "JPM",
+  "signal": -0.375,
+  "confidence": 0.5437,
+  "target_qty": 187,
+  "limit_price_bps": 0,
+  "generated_at": "2026-07-07T16:10:51.478261Z"
+}

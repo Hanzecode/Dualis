@@ -1,0 +1,108 @@
+# wing_a/docker-compose.yml
+# ─────────────────────────────────────────────────────────────────────────────
+#  QUANTCORE LOCAL DEVELOPMENT STACK
+#  Runs the full Wing A infrastructure locally — no AWS needed for dev.
+#
+#  Services:
+#    timescaledb  — trade/position persistence (TimescaleDB = PostgreSQL + extension)
+#    rds_mock     — Wing B analytics DB (plain PostgreSQL for local dev)
+#    localstack   — AWS S3 mock (so we can test signal file polling without AWS)
+#
+#  Usage:
+#    docker-compose up -d          # start all services
+#    docker-compose down -v        # stop and remove volumes
+#    docker-compose logs -f        # tail all logs
+#
+#  After starting:
+#    psql postgresql://quant:quant@localhost:5432/quantcore -f db/schema.sql
+#    python main.py
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+services:
+
+  # ── TimescaleDB — Wing A trade and position persistence ──────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16    # PostgreSQL 16 + TimescaleDB
+    container_name: quantcore-timescaledb
+    environment:
+      POSTGRES_USER:     quant
+      POSTGRES_PASSWORD: quant
+      POSTGRES_DB:       quantcore
+    ports:
+      - "5434:5432"                             # Exposed to host for psql access (5432 taken by a local Postgres)
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data   # Persist data between restarts
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      # docker-entrypoint-initdb.d: scripts run automatically on first startup
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant -d quantcore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── PostgreSQL RDS mock — Wing B analytics DB (read by Wing A for PnL feedback) ──
+  rds_mock:
+    image: postgres:16
+    container_name: quantcore-rds-mock
+    environment:
+      POSTGRES_USER:     quant
+      POSTGRES_PASSWORD: quant
+      POSTGRES_DB:       quantcore_analytics
+    ports:
+      - "5433:5432"                             # Different host port to avoid conflict
+    volumes:
+      - rds_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant -d quantcore_analytics"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── LocalStack — AWS S3 mock for signal file polling without real AWS ─────────
+  localstack:
+    image: localstack/localstack:3.4
+    container_name: quantcore-localstack
+    environment:
+      SERVICES:         s3                       # Only mock S3 (keeps image light)
+      DEFAULT_REGION:   us-east-1
+      AWS_ACCESS_KEY_ID:     test               # Dummy credentials for local use
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "4566:4566"                             # LocalStack gateway port
+    volumes:
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:4566/_localstack/health | grep '\"s3\": \"available\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+volumes:
+  timescaledb_data:
+  rds_data:
+  localstack_data:
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  AFTER docker-compose up -d:
+#
+#  1. Apply schema:
+#     psql postgresql://quant:quant@localhost:5432/quantcore -f db/schema.sql
+#
+#  2. Create LocalStack S3 bucket:
+#     AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
+#     aws --endpoint-url=http://localhost:4566 s3 mb s3://quantcore-signals
+#
+#  3. Point Wing A at LocalStack S3 (for dev):
+#     export SIGNAL_BUCKET=quantcore-signals
+#     export AWS_ENDPOINT_URL=http://localhost:4566
+#     export AWS_ACCESS_KEY_ID=test
+#     export AWS_SECRET_ACCESS_KEY=test
+#
+#  4. Run Wing A:
+#     python main.py
+# ─────────────────────────────────────────────────────────────────────────────

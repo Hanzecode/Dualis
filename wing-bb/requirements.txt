@@ -1,0 +1,29 @@
+# requirements.txt — Wing B dependencies.
+# Install everything with:  pip install -r requirements.txt
+
+# ── Core data stack ────────────────────────────────────────────────
+polars>=0.20          # fast ETL DataFrames (lazy evaluation)
+pyarrow>=14.0         # required by Polars for pandas interop
+pandas>=2.0           # used at the boundaries (DB I/O, yfinance)
+numpy>=1.24           # numerical arrays under everything
+
+# ── Database ───────────────────────────────────────────────────────
+SQLAlchemy>=2.0       # database toolkit; SQLite local, Postgres in prod
+# psycopg2-binary     # UNCOMMENT when pointing DATABASE_URL at PostgreSQL
+
+# ── Machine learning ───────────────────────────────────────────────
+scikit-learn>=1.3     # regression, PCA, K-Means, gradient boosting
+shap>=0.44            # per-prediction explanations (valuation page)
+
+# ── Dashboard ──────────────────────────────────────────────────────
+streamlit>=1.30       # the analyst web app
+
+# ── Data sources ───────────────────────────────────────────────────
+yfinance>=0.2         # free price history (falls back to synthetic)
+fredapi>=0.5          # FRED macro data (needs free FRED_API_KEY env var)
+
+# ── Messaging (optional locally) ───────────────────────────────────
+redis>=5.0            # instant signal notification to Wing A
+
+boto3>=1.34
+apache-airflow>=2.8.3

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker --version)",
+      "Bash(brew list *)",
+      "Bash(pkg-config --list-all)",
+      "Bash(brew --prefix postgresql@14)",
+      "Bash(PKG_CONFIG_PATH=\"/opt/homebrew/opt/postgresql@14/lib/pkgconfig\" cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/postgresql@14 ..)"
+    ]
+  }
+}

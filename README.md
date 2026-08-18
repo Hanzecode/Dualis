@@ -44,7 +44,7 @@ graph TD
         SCOREDAG["dags/wing_b_score_dag.py<br/>scheduled scoring, every ~15 min"]
         SCORER["scoring/scorer.py<br/>GradientBoostingRegressor → alpha score"]
         ANALYST["dashboard/pages/5_signal_publisher.py<br/>human analyst UI"]
-        PGSIG[("Postgres: analyst_signals<br/>audit trail")]
+        PGSIG[("SQLite: analyst_signals<br/>audit trail")]
         WRITER["common/signal_writer.py<br/>validate + serialize to contract"]
         REDIS[["Redis PUBLISH<br/>'doorbell' notification"]]
 

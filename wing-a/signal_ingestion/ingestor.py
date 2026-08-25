@@ -1,13 +1,14 @@
 # wing_a/signal_ingestion/ingestor.py
 # ─────────────────────────────────────────────────────────────────────────────
 #  SIGNAL INGESTOR
-#  Polls S3 every N seconds for signal files written by Wing B's score DAG.
+#  Polls the local signal directory every N seconds for signal files
+#  written by Wing B's scorer / analyst publisher.
 #  Validates each signal (schema, staleness, universe membership).
 #  Emits validated AlphaSignal dataclasses to a callback.
 #
-#  Flow:  S3 bucket (Wing B writes) → poll → validate → AlphaSignal callback
+#  Flow:  Local signals folder (Wing B writes) → poll → validate → AlphaSignal callback
 #
-#  Message contract with Wing B score DAG (JSON in S3):
+#  Message contract with Wing B (JSON on disk):
 #  {
 #    "symbol":          "AAPL",
 #    "signal":          0.73,          # normalised alpha [-1.0, +1.0]
@@ -29,9 +30,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, List, Optional, Set
-
-import boto3                     # AWS SDK — pip install boto3
-from botocore.exceptions import ClientError
 
 from config.settings import Settings, settings as default_settings
 
@@ -73,8 +71,8 @@ class AlphaSignal:
 
 class SignalIngestor:
     """
-    Runs a background thread that polls S3 (or local fallback) every poll_interval_s seconds.
-    On each poll, lists new signal files, downloads and parses each one,
+    Runs a background thread that polls the local signal directory every poll_interval_s seconds.
+    On each poll, lists new signal files, parses each one,
     validates it, and calls on_signal(AlphaSignal) for each valid signal.
 
     Thread model: one daemon thread runs _poll_loop().
@@ -88,14 +86,8 @@ class SignalIngestor:
     ):
         self._on_signal = on_signal
         self._cfg = cfg
-        try:
-            self._s3 = boto3.client("s3")   # Uses ~/.aws/credentials or IAM role
-        except Exception as e:
-            logger.warning("Could not initialize boto3 S3 client (%s) — will use local fallback", e)
-            self._s3 = None
 
         # Track which files we've already processed so we don't re-emit on each poll
-        # In production: persist this set to DynamoDB or a file so it survives restarts
         self._seen_keys: Set[str] = set()
 
         self._stop_event = threading.Event()
@@ -106,10 +98,9 @@ class SignalIngestor:
         )
 
     def start(self) -> None:
-        logger.info("SignalIngestor starting — bucket=%s prefix=%s poll=%ds",
-                    self._cfg.s3.signal_bucket,
-                    self._cfg.s3.signal_prefix,
-                    self._cfg.s3.poll_interval_s)
+        logger.info("SignalIngestor starting — dir=%s poll=%ds",
+                    self._cfg.signals.signal_dir,
+                    self._cfg.signals.poll_interval_s)
         self._thread.start()
 
     def stop(self) -> None:
@@ -120,7 +111,7 @@ class SignalIngestor:
     # ── Private ───────────────────────────────────────────────────────────────
 
     def _poll_loop(self) -> None:
-        """Main loop: poll S3, process new files, sleep, repeat."""
+        """Main loop: poll local signal directory, process new files, sleep, repeat."""
         while not self._stop_event.is_set():
             try:
                 self._poll_once()
@@ -129,45 +120,13 @@ class SignalIngestor:
                 logger.error("SignalIngestor poll error: %s", e, exc_info=True)
 
             # Wait for poll_interval_s, but wake immediately if stop() is called
-            self._stop_event.wait(timeout=self._cfg.s3.poll_interval_s)
+            self._stop_event.wait(timeout=self._cfg.signals.poll_interval_s)
 
     def _poll_once(self) -> None:
-        """List S3 prefix (or local directory), parse new files, validate, emit."""
-        s3_success = False
-        if self._s3 is not None:
-            try:
-                # list_objects_v2: paginated listing of all objects under the prefix
-                response = self._s3.list_objects_v2(
-                    Bucket=self._cfg.s3.signal_bucket,
-                    Prefix=self._cfg.s3.signal_prefix,
-                )
-                objects = response.get("Contents", [])
-                s3_success = True
-                new_count = 0
-                for obj in objects:
-                    key = obj["Key"]
-                    if key in self._seen_keys:
-                        continue   # Already processed
-
-                    signal = self._download_and_parse(key)
-                    if signal is not None:
-                        self._on_signal(signal)   # Emit to downstream (portfolio constructor)
-                        new_count += 1
-
-                    self._seen_keys.add(key)   # Mark as seen regardless — don't retry bad files
-
-                if new_count > 0:
-                    logger.info("SignalIngestor emitted %d new signals from S3", new_count)
-            except Exception as e:
-                logger.warning("S3 list_objects failed (%s) — falling back to local signal directory", e)
-                s3_success = False
-
-        if not s3_success:
-            self._poll_local_dir()
-
-    def _poll_local_dir(self) -> None:
-        """Scan local signal directories when S3 is unavailable."""
+        """Scan local signal directories, parse new files, validate, emit."""
+        configured_dir = Path(self._cfg.signals.signal_dir)
         candidates = [
+            configured_dir,
             Path(os.getenv("LOCAL_SIGNAL_DIR", "")) if os.getenv("LOCAL_SIGNAL_DIR") else None,
             Path(__file__).resolve().parents[2] / "wing-bb" / "signals_out" / "signals",
             Path("signals_out") / "signals",
@@ -179,20 +138,22 @@ class SignalIngestor:
             return
 
         new_count = 0
+        # Use first existing unique directory
+        unique_dirs = []
+        seen_dir_paths = set()
         for d in found_dirs:
+            resolved = str(d.resolve())
+            if resolved not in seen_dir_paths:
+                seen_dir_paths.add(resolved)
+                unique_dirs.append(d)
+
+        for d in unique_dirs:
             for file_path in d.rglob("*.json"):
                 key = str(file_path.resolve())
                 if key in self._seen_keys:
                     continue
 
-                try:
-                    data = json.loads(file_path.read_text(encoding="utf-8"))
-                except Exception as e:
-                    logger.warning("Malformed JSON in local file %s: %s", file_path, e)
-                    self._seen_keys.add(key)
-                    continue
-
-                signal = self._validate(data, key=file_path.name)
+                signal = self._parse_file(file_path)
                 if signal is not None:
                     self._on_signal(signal)
                     new_count += 1
@@ -200,27 +161,23 @@ class SignalIngestor:
                 self._seen_keys.add(key)
 
         if new_count > 0:
-            logger.info("SignalIngestor emitted %d new signals from local directory", new_count)
+            logger.info("SignalIngestor emitted %d new signals", new_count)
 
-    def _download_and_parse(self, key: str) -> Optional[AlphaSignal]:
-        """Download one S3 object and parse it into an AlphaSignal."""
+    def _parse_file(self, file_path: Path) -> Optional[AlphaSignal]:
+        """Read one local JSON file and parse it into an AlphaSignal."""
         try:
-            obj = self._s3.get_object(
-                Bucket=self._cfg.s3.signal_bucket,
-                Key=key,
-            )
-            raw = obj["Body"].read().decode("utf-8")
-        except ClientError as e:
-            logger.error("S3 get_object failed for %s: %s", key, e)
+            raw = file_path.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.error("Could not read file %s: %s", file_path, e)
             return None
 
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as e:
-            logger.warning("Malformed JSON in %s: %s", key, e)
+            logger.warning("Malformed JSON in %s: %s", file_path, e)
             return None
 
-        return self._validate(data, key)
+        return self._validate(data, key=file_path.name)
 
     def _validate(self, data: dict, key: str) -> Optional[AlphaSignal]:
         """
@@ -267,9 +224,9 @@ class SignalIngestor:
 
         # ── Staleness check ─────────────────────────────────────────────────
         age_s = (datetime.now(timezone.utc) - generated_at).total_seconds()
-        if age_s > self._cfg.s3.max_signal_age_s:
+        if age_s > self._cfg.signals.max_signal_age_s:
             logger.warning("Signal %s is stale: age=%.0fs limit=%ds",
-                           key, age_s, self._cfg.s3.max_signal_age_s)
+                           key, age_s, self._cfg.signals.max_signal_age_s)
             return None
 
         # ── Strength filter ─────────────────────────────────────────────────

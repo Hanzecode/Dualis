@@ -27,7 +27,7 @@ sys.path.insert(0, ".")
 
 def fresh_settings():
     """Return a Settings instance with test-safe values."""
-    from config.settings import Settings, RiskConfig, PortfolioConfig, S3Config
+    from config.settings import Settings, RiskConfig, PortfolioConfig, SignalConfig
     s = Settings()
     s.symbols = ["AAPL", "MSFT"]
     s.risk.max_order_size           = 1000
@@ -37,7 +37,7 @@ def fresh_settings():
     s.risk.max_total_notional_usd   = 100_000.0
     s.risk.min_signal_strength      = 0.10
     s.risk.min_confidence           = 0.50
-    s.s3.max_signal_age_s           = 300
+    s.signals.max_signal_age_s      = 300
     s.portfolio.min_order_shares    = 1
     s.portfolio.target_annual_vol   = 0.15
     return s
@@ -77,37 +77,26 @@ def make_fill(symbol="AAPL", qty=100, price_bps=1890000, trade_id=1):
 
 class TestSignalIngestor:
 
-    def test_valid_signal_parsed_correctly(self):
-        """A well-formed S3 signal file produces a correct AlphaSignal."""
+    def test_valid_signal_parsed_correctly(self, tmp_path):
+        """A well-formed local signal file produces a correct AlphaSignal."""
         from signal_ingestion.ingestor import SignalIngestor
 
         received: List = []
         cfg = fresh_settings()
+        cfg.signals.signal_dir = str(tmp_path)
 
-        with patch("boto3.client") as mock_boto:
-            mock_s3 = MagicMock()
-            mock_boto.return_value = mock_s3
+        signal_json = {
+            "symbol":          "AAPL",
+            "signal":          0.73,
+            "confidence":      0.85,
+            "target_qty":      500,
+            "limit_price_bps": 1890000,
+            "generated_at":    datetime.now(timezone.utc).isoformat(),
+        }
+        (tmp_path / "AAPL.json").write_text(json.dumps(signal_json))
 
-            # Simulate S3 list returning one object
-            mock_s3.list_objects_v2.return_value = {
-                "Contents": [{"Key": "signals/latest/AAPL.json"}]
-            }
-
-            # Simulate S3 get returning a valid signal
-            signal_json = json.dumps({
-                "symbol":          "AAPL",
-                "signal":          0.73,
-                "confidence":      0.85,
-                "target_qty":      500,
-                "limit_price_bps": 1890000,
-                "generated_at":    datetime.now(timezone.utc).isoformat(),
-            })
-            mock_s3.get_object.return_value = {
-                "Body": MagicMock(read=lambda: signal_json.encode())
-            }
-
-            ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
-            ingestor._poll_once()
+        ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
+        ingestor._poll_once()
 
         assert len(received) == 1
         sig = received[0]
@@ -116,141 +105,84 @@ class TestSignalIngestor:
         assert sig.confidence == 0.85
         assert sig.target_qty == 500
 
-    def test_stale_signal_rejected(self):
+    def test_stale_signal_rejected(self, tmp_path):
         """Signals older than max_signal_age_s are dropped."""
         from signal_ingestion.ingestor import SignalIngestor
 
         received: List = []
         cfg = fresh_settings()
-        cfg.s3.max_signal_age_s = 10   # Very tight window
+        cfg.signals.signal_dir = str(tmp_path)
+        cfg.signals.max_signal_age_s = 10   # Very tight window
 
-        with patch("boto3.client") as mock_boto:
-            mock_s3 = MagicMock()
-            mock_boto.return_value = mock_s3
-            mock_s3.list_objects_v2.return_value = {
-                "Contents": [{"Key": "signals/latest/AAPL.json"}]
-            }
-            # Signal generated 60s ago — should be stale
-            stale_time = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
-            signal_json = json.dumps({
-                "symbol": "AAPL", "signal": 0.73, "confidence": 0.85,
-                "target_qty": 500, "limit_price_bps": 1890000,
-                "generated_at": stale_time,
-            })
-            mock_s3.get_object.return_value = {
-                "Body": MagicMock(read=lambda: signal_json.encode())
-            }
-            ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
-            ingestor._poll_once()
+        stale_time = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+        signal_json = {
+            "symbol": "AAPL", "signal": 0.73, "confidence": 0.85,
+            "target_qty": 500, "limit_price_bps": 1890000,
+            "generated_at": stale_time,
+        }
+        (tmp_path / "AAPL.json").write_text(json.dumps(signal_json))
+
+        ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
+        ingestor._poll_once()
 
         assert len(received) == 0   # Stale signal must be dropped
 
-    def test_unknown_symbol_rejected(self):
+    def test_unknown_symbol_rejected(self, tmp_path):
         """Signals for symbols outside the universe are dropped silently."""
         from signal_ingestion.ingestor import SignalIngestor
 
         received: List = []
         cfg = fresh_settings()
+        cfg.signals.signal_dir = str(tmp_path)
         cfg.symbols = ["AAPL", "MSFT"]   # TSLA not in universe
 
-        with patch("boto3.client") as mock_boto:
-            mock_s3 = MagicMock()
-            mock_boto.return_value = mock_s3
-            mock_s3.list_objects_v2.return_value = {
-                "Contents": [{"Key": "signals/latest/TSLA.json"}]
-            }
-            signal_json = json.dumps({
-                "symbol": "TSLA", "signal": 0.5, "confidence": 0.8,
-                "target_qty": 100, "limit_price_bps": 0,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-            })
-            mock_s3.get_object.return_value = {
-                "Body": MagicMock(read=lambda: signal_json.encode())
-            }
-            ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
-            ingestor._poll_once()
+        signal_json = {
+            "symbol": "TSLA", "signal": 0.5, "confidence": 0.8,
+            "target_qty": 100, "limit_price_bps": 0,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        (tmp_path / "TSLA.json").write_text(json.dumps(signal_json))
+
+        ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
+        ingestor._poll_once()
 
         assert len(received) == 0
 
-    def test_weak_signal_rejected(self):
+    def test_weak_signal_rejected(self, tmp_path):
         """Signals below min_signal_strength threshold are dropped."""
         from signal_ingestion.ingestor import SignalIngestor
 
         received: List = []
         cfg = fresh_settings()
+        cfg.signals.signal_dir = str(tmp_path)
 
-        with patch("boto3.client") as mock_boto:
-            mock_s3 = MagicMock()
-            mock_boto.return_value = mock_s3
-            mock_s3.list_objects_v2.return_value = {
-                "Contents": [{"Key": "signals/latest/AAPL.json"}]
-            }
-            signal_json = json.dumps({
-                "symbol": "AAPL", "signal": 0.05,   # Below 0.10 threshold
-                "confidence": 0.9, "target_qty": 100,
-                "limit_price_bps": 0,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-            })
-            mock_s3.get_object.return_value = {
-                "Body": MagicMock(read=lambda: signal_json.encode())
-            }
-            ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
-            ingestor._poll_once()
-
-        assert len(received) == 0
-
-    def test_malformed_json_dropped_safely(self):
-        """Malformed JSON in S3 doesn't crash the ingestor."""
-        from signal_ingestion.ingestor import SignalIngestor
-
-        received: List = []
-        cfg = fresh_settings()
-
-        with patch("boto3.client") as mock_boto:
-            mock_s3 = MagicMock()
-            mock_boto.return_value = mock_s3
-            mock_s3.list_objects_v2.return_value = {
-                "Contents": [{"Key": "signals/latest/AAPL.json"}]
-            }
-            mock_s3.get_object.return_value = {
-                "Body": MagicMock(read=lambda: b"THIS IS NOT JSON {{{{")
-            }
-            ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
-            ingestor._poll_once()   # Must not raise
-
-        assert len(received) == 0
-
-    def test_local_directory_fallback_when_s3_unavailable(self, tmp_path, monkeypatch):
-        """When S3 fails or is not available, ingestor reads local signals."""
-        from signal_ingestion.ingestor import SignalIngestor
-
-        received: List = []
-        cfg = fresh_settings()
-        cfg.symbols = ["AAPL"]
-
-        # Create a local test signal file
-        signal_dir = tmp_path / "signals" / "model"
-        signal_dir.mkdir(parents=True)
-        signal_file = signal_dir / "AAPL_test.json"
-        signal_file.write_text(json.dumps({
-            "symbol": "AAPL",
-            "signal": 0.75,
-            "confidence": 0.85,
-            "target_qty": 300,
+        signal_json = {
+            "symbol": "AAPL", "signal": 0.05,   # Below 0.10 threshold
+            "confidence": 0.9, "target_qty": 100,
             "limit_price_bps": 0,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-        }))
+        }
+        (tmp_path / "AAPL.json").write_text(json.dumps(signal_json))
 
-        monkeypatch.setenv("LOCAL_SIGNAL_DIR", str(signal_dir))
+        ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
+        ingestor._poll_once()
 
-        with patch("boto3.client", side_effect=Exception("No AWS")):
-            ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
-            ingestor._poll_once()
+        assert len(received) == 0
 
-        assert len(received) == 1
-        assert received[0].symbol == "AAPL"
-        assert received[0].signal == 0.75
-        assert received[0].target_qty == 300
+    def test_malformed_json_dropped_safely(self, tmp_path):
+        """Malformed JSON doesn't crash the ingestor."""
+        from signal_ingestion.ingestor import SignalIngestor
+
+        received: List = []
+        cfg = fresh_settings()
+        cfg.signals.signal_dir = str(tmp_path)
+
+        (tmp_path / "AAPL.json").write_text("THIS IS NOT JSON {{{{")
+
+        ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
+        ingestor._poll_once()   # Must not raise
+
+        assert len(received) == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

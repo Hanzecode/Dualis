@@ -8,9 +8,7 @@
 # ── ZeroMQ — messaging between Python and C++ engine ─────────────────────────
 pyzmq==26.0.3
 
-# ── AWS SDK — S3 signal file polling, Secrets Manager ────────────────────────
-boto3==1.34.69
-botocore==1.34.69
+
 
 # ── WebSocket client — Alpaca market data feed ────────────────────────────────
 websocket-client==1.8.0

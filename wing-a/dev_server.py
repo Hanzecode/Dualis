@@ -9,8 +9,8 @@
 #
 #    2. ZMQ PUB socket   (port 5556) — publishes fake fills to fill_subscriber.py
 #
-#    3. S3 signal files              — writes fake AlphaSignal JSON locally
-#       Wing A's ingestor polls these via a patched boto3 client
+#    3. Signal files                 — writes fake AlphaSignal JSON locally
+#       Wing A's ingestor polls these directly from the local signals folder
 #
 #    4. Alpaca WebSocket             — sends fake quote ticks to alpaca_feed.py
 #
@@ -300,43 +300,8 @@ class InMemoryDB:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def apply_patches(db: InMemoryDB, fake_ticker: FakeAlpacaTicker):
-    """Patch boto3, psycopg2, and alpaca_feed to use local fakes."""
+    """Patch psycopg2 and alpaca_feed to use local fakes."""
     import unittest.mock as mock
-
-    # ── Patch S3: redirect to local files ────────────────────────────────────
-    real_boto3_client = None
-    try:
-        import boto3
-        real_boto3_client = boto3.client
-    except ImportError:
-        pass
-
-    def fake_s3_client(service, **kwargs):
-        if service != "s3":
-            return real_boto3_client(service, **kwargs) if real_boto3_client else None
-
-        class FakeS3:
-            def list_objects_v2(self, Bucket, Prefix="", **kw):
-                files = list(SIGNAL_DIR.rglob("*.json")) if SIGNAL_DIR.exists() else []
-                return {"Contents": [{"Key": str(f)} for f in files]}
-
-            def get_object(self, Bucket, Key, **kw):
-                path = Path(Key)
-                if not path.exists():
-                    path = SIGNAL_DIR / path.name
-                data = path.read_bytes()
-
-                class Body:
-                    def read(self_inner):
-                        return data
-
-                return {"Body": Body()}
-
-        return FakeS3()
-
-    import boto3
-    boto3.client = fake_s3_client
-    logger.info("Patch: boto3.client → FakeS3 (reading from %s)", SIGNAL_DIR)
 
     # ── Patch psycopg2: replace with in-memory store ──────────────────────────
     try:
@@ -431,8 +396,8 @@ def main():
         # Apply all patches then launch Wing A in-process
         apply_patches(db, ticker)
 
-        # Patch signal ingestor to read from local dir instead of real S3
-        os.environ["SIGNAL_BUCKET"] = str(SIGNAL_DIR)
+        # Point signal ingestor to local signal dir
+        os.environ["LOCAL_SIGNAL_DIR"] = str(SIGNAL_DIR)
 
         logger.info("Launching Wing A main.py in-process...")
         print("\n" + "─"*44)

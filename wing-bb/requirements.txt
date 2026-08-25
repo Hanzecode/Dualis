@@ -25,5 +25,4 @@ fredapi>=0.5          # FRED macro data (needs free FRED_API_KEY env var)
 # ── Messaging (optional locally) ───────────────────────────────────
 redis>=5.0            # instant signal notification to Wing A
 
-boto3>=1.34
 apache-airflow>=2.8.3

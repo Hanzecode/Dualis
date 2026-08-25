@@ -7,6 +7,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Dict
 import os
 
@@ -39,14 +40,14 @@ class ZmqConfig:
 
 
 @dataclass
-class S3Config:
-    # S3 bucket Wing B writes signal files to (score DAG output)
-    signal_bucket: str = os.getenv("SIGNAL_BUCKET", "quantcore-signals")
+class SignalConfig:
+    # Local directory where Wing B writes and Wing A reads signal files
+    signal_dir: str = os.getenv(
+        "LOCAL_SIGNAL_DIR",
+        str(Path(__file__).resolve().parents[2] / "wing-bb" / "signals_out" / "signals")
+    )
 
-    # Prefix inside the bucket where signal files live
-    signal_prefix: str = "signals/latest/"
-
-    # How often to poll S3 for new signal files (seconds)
+    # How often to poll the signal directory for new files (seconds)
     poll_interval_s: int = 60
 
     # Reject signals older than this (seconds) — prevents acting on stale data
@@ -127,11 +128,16 @@ class Settings:
     ])
 
     zmq:       ZmqConfig       = field(default_factory=ZmqConfig)
-    s3:        S3Config        = field(default_factory=S3Config)
+    signals:   SignalConfig    = field(default_factory=SignalConfig)
     alpaca:    AlpacaConfig    = field(default_factory=AlpacaConfig)
     risk:      RiskConfig      = field(default_factory=RiskConfig)
     portfolio: PortfolioConfig = field(default_factory=PortfolioConfig)
     db:        DatabaseConfig  = field(default_factory=DatabaseConfig)
+
+    @property
+    def s3(self) -> SignalConfig:
+        """Alias for backward compatibility."""
+        return self.signals
 
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

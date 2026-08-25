@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, List, Optional, Set
 
 import boto3                     # AWS SDK — pip install boto3
@@ -71,7 +73,7 @@ class AlphaSignal:
 
 class SignalIngestor:
     """
-    Runs a background thread that polls S3 every poll_interval_s seconds.
+    Runs a background thread that polls S3 (or local fallback) every poll_interval_s seconds.
     On each poll, lists new signal files, downloads and parses each one,
     validates it, and calls on_signal(AlphaSignal) for each valid signal.
 
@@ -86,7 +88,11 @@ class SignalIngestor:
     ):
         self._on_signal = on_signal
         self._cfg = cfg
-        self._s3 = boto3.client("s3")   # Uses ~/.aws/credentials or IAM role
+        try:
+            self._s3 = boto3.client("s3")   # Uses ~/.aws/credentials or IAM role
+        except Exception as e:
+            logger.warning("Could not initialize boto3 S3 client (%s) — will use local fallback", e)
+            self._s3 = None
 
         # Track which files we've already processed so we don't re-emit on each poll
         # In production: persist this set to DynamoDB or a file so it survives restarts
@@ -126,37 +132,75 @@ class SignalIngestor:
             self._stop_event.wait(timeout=self._cfg.s3.poll_interval_s)
 
     def _poll_once(self) -> None:
-        """List S3 prefix, download new files, validate, emit."""
-        try:
-            # list_objects_v2: paginated listing of all objects under the prefix
-            response = self._s3.list_objects_v2(
-                Bucket=self._cfg.s3.signal_bucket,
-                Prefix=self._cfg.s3.signal_prefix,
-            )
-        except ClientError as e:
-            logger.error("S3 list_objects failed: %s", e)
-            return
+        """List S3 prefix (or local directory), parse new files, validate, emit."""
+        s3_success = False
+        if self._s3 is not None:
+            try:
+                # list_objects_v2: paginated listing of all objects under the prefix
+                response = self._s3.list_objects_v2(
+                    Bucket=self._cfg.s3.signal_bucket,
+                    Prefix=self._cfg.s3.signal_prefix,
+                )
+                objects = response.get("Contents", [])
+                s3_success = True
+                new_count = 0
+                for obj in objects:
+                    key = obj["Key"]
+                    if key in self._seen_keys:
+                        continue   # Already processed
 
-        objects = response.get("Contents", [])
-        if not objects:
-            logger.debug("No signal files found in S3")
+                    signal = self._download_and_parse(key)
+                    if signal is not None:
+                        self._on_signal(signal)   # Emit to downstream (portfolio constructor)
+                        new_count += 1
+
+                    self._seen_keys.add(key)   # Mark as seen regardless — don't retry bad files
+
+                if new_count > 0:
+                    logger.info("SignalIngestor emitted %d new signals from S3", new_count)
+            except Exception as e:
+                logger.warning("S3 list_objects failed (%s) — falling back to local signal directory", e)
+                s3_success = False
+
+        if not s3_success:
+            self._poll_local_dir()
+
+    def _poll_local_dir(self) -> None:
+        """Scan local signal directories when S3 is unavailable."""
+        candidates = [
+            Path(os.getenv("LOCAL_SIGNAL_DIR", "")) if os.getenv("LOCAL_SIGNAL_DIR") else None,
+            Path(__file__).resolve().parents[2] / "wing-bb" / "signals_out" / "signals",
+            Path("signals_out") / "signals",
+        ]
+
+        found_dirs = [d for d in candidates if d and d.exists()]
+        if not found_dirs:
+            logger.debug("No local signal directory found among: %s", candidates)
             return
 
         new_count = 0
-        for obj in objects:
-            key = obj["Key"]
-            if key in self._seen_keys:
-                continue   # Already processed
+        for d in found_dirs:
+            for file_path in d.rglob("*.json"):
+                key = str(file_path.resolve())
+                if key in self._seen_keys:
+                    continue
 
-            signal = self._download_and_parse(key)
-            if signal is not None:
-                self._on_signal(signal)   # Emit to downstream (portfolio constructor)
-                new_count += 1
+                try:
+                    data = json.loads(file_path.read_text(encoding="utf-8"))
+                except Exception as e:
+                    logger.warning("Malformed JSON in local file %s: %s", file_path, e)
+                    self._seen_keys.add(key)
+                    continue
 
-            self._seen_keys.add(key)   # Mark as seen regardless — don't retry bad files
+                signal = self._validate(data, key=file_path.name)
+                if signal is not None:
+                    self._on_signal(signal)
+                    new_count += 1
+
+                self._seen_keys.add(key)
 
         if new_count > 0:
-            logger.info("SignalIngestor emitted %d new signals", new_count)
+            logger.info("SignalIngestor emitted %d new signals from local directory", new_count)
 
     def _download_and_parse(self, key: str) -> Optional[AlphaSignal]:
         """Download one S3 object and parse it into an AlphaSignal."""

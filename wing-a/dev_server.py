@@ -64,8 +64,13 @@ BASE_PRICES = {
     "NVDA": 8_750_000,
 }
 
-SIGNAL_DIR  = Path("/tmp/quantcore_dev_signals")
-SIGNAL_DIR.mkdir(exist_ok=True)
+SIGNAL_DIR = Path(
+    os.getenv(
+        "LOCAL_SIGNAL_DIR",
+        str(Path(__file__).resolve().parents[1] / "wing-bb" / "signals_out" / "signals" / "model"),
+    )
+)
+SIGNAL_DIR.mkdir(parents=True, exist_ok=True)
 
 trade_id_counter = 1000
 
@@ -312,7 +317,7 @@ def apply_patches(db: InMemoryDB, fake_ticker: FakeAlpacaTicker):
 
         class FakeS3:
             def list_objects_v2(self, Bucket, Prefix="", **kw):
-                files = list(SIGNAL_DIR.glob("*.json"))
+                files = list(SIGNAL_DIR.rglob("*.json")) if SIGNAL_DIR.exists() else []
                 return {"Contents": [{"Key": str(f)} for f in files]}
 
             def get_object(self, Bucket, Key, **kw):

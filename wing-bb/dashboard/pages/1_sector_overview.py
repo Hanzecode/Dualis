@@ -69,37 +69,31 @@ if prices.empty:
     st.stop()    # halts the script here; nothing below renders
 
 
-def sector_return(df: pd.DataFrame, days: int) -> pd.Series:
-    """Average % return of each sector over the last `days` rows.
+@st.cache_data
+def calculate_sector_performance(df: pd.DataFrame, days: int = 126) -> pd.DataFrame:
+    """Calculate cumulative return for each sector over the last `days`.
 
-    Method: for each ticker take price_now / price_n_days_ago - 1,
-    then average those returns within each sector.
+    Returns a DataFrame with trade_date as index and one column per sector,
+    showing cumulative performance.
     """
-    out = {}
-    for (sector, ticker), grp in df.groupby(["sector", "ticker"]):
-        grp = grp.sort_values("trade_date")
-        if len(grp) > days:                       # enough history?
-            ret = grp["close"].iloc[-1] / grp["close"].iloc[-1 - days] - 1
-            out.setdefault(sector, []).append(ret)  # collect per sector
-    # Average the per-ticker returns inside each sector.
-    return pd.Series({s: sum(v) / len(v) for s, v in out.items()})
+    df["trade_date"] = pd.to_datetime(df["trade_date"])
+    df = df.sort_values(["ticker", "trade_date"])
+    df["daily_ret"] = df.groupby("ticker")["close"].pct_change().fillna(0)
+
+    # Equal-weight daily return for each sector
+    sector_daily_returns = df.groupby(["trade_date", "sector"])["daily_ret"].mean().unstack()
+
+    # Limit to the last `days` and calculate cumulative performance
+    performance = (1 + sector_daily_returns.tail(days)).cumprod() - 1
+    return performance
 
 
-# Build one column per horizon. dict-comprehension keeps it tidy.
-horizons = {"1 day": 1, "1 week": 5, "1 month": 21, "6 months": 126}
-table = pd.DataFrame({label: sector_return(prices, d) for label, d in horizons.items()})
+st.subheader("Daily Cumulative Sector Performance (6 Months)")
+performance_chart_data = calculate_sector_performance(prices, days=126)
 
-# Style: format as percentages and color negative red / positive green.
-# .style.format applies display formatting without changing the data.
-st.dataframe(
-    table.style
-         .format("{:+.2%}")                       # e.g. +3.41%
-         .map(lambda v: "color: #c33" if v < 0 else "color: #2a7"),
-    use_container_width=True,
-)
+st.line_chart(performance_chart_data)
 
 st.caption(
-    "Read across a row to see one sector's performance at different "
-    "horizons. A sector strong at 6 months but weak at 1 week may be "
-    "starting to roll over — classic rotation signal."
+    "Performance is compounded daily for each sector over the last 6 months (126 trading days). "
+    "This high-resolution view helps visualize trends and rotation between sectors over time."
 )

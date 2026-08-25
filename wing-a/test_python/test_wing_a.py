@@ -220,6 +220,38 @@ class TestSignalIngestor:
 
         assert len(received) == 0
 
+    def test_local_directory_fallback_when_s3_unavailable(self, tmp_path, monkeypatch):
+        """When S3 fails or is not available, ingestor reads local signals."""
+        from signal_ingestion.ingestor import SignalIngestor
+
+        received: List = []
+        cfg = fresh_settings()
+        cfg.symbols = ["AAPL"]
+
+        # Create a local test signal file
+        signal_dir = tmp_path / "signals" / "model"
+        signal_dir.mkdir(parents=True)
+        signal_file = signal_dir / "AAPL_test.json"
+        signal_file.write_text(json.dumps({
+            "symbol": "AAPL",
+            "signal": 0.75,
+            "confidence": 0.85,
+            "target_qty": 300,
+            "limit_price_bps": 0,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }))
+
+        monkeypatch.setenv("LOCAL_SIGNAL_DIR", str(signal_dir))
+
+        with patch("boto3.client", side_effect=Exception("No AWS")):
+            ingestor = SignalIngestor(on_signal=received.append, cfg=cfg)
+            ingestor._poll_once()
+
+        assert len(received) == 1
+        assert received[0].symbol == "AAPL"
+        assert received[0].signal == 0.75
+        assert received[0].target_qty == 300
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  PORTFOLIO CONSTRUCTOR TESTS

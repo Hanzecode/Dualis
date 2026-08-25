@@ -62,3 +62,23 @@ else:
     with col2:
         funda = pd.read_sql("SELECT COUNT(*) AS n FROM sector_fundamentals", engine)["n"][0]
         st.metric("Stocks tracked", funda)
+
+    st.divider()
+    st.subheader("Latest prices")
+
+    # Fetch and display the most recent day's prices.
+    # Using a subquery to find the max date is efficient.
+    latest_prices = pd.read_sql(
+        "SELECT * FROM sector_prices "
+        "WHERE trade_date = (SELECT MAX(trade_date) FROM sector_prices) "
+        "ORDER BY ticker",
+        engine,
+    )
+    st.dataframe(
+        latest_prices.style.format({
+            "close": "${:,.2f}",
+            "volume": "{:,.0f}",
+            "daily_ret": "{:+.2%}",
+        }),
+        use_container_width=True,
+    )

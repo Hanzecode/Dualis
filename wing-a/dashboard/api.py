@@ -68,6 +68,8 @@ class PnLState(BaseModel):
     session: float
     unrealised: float
     realised: float
+    cash: float
+    equity: float
     history: list[PnLPoint]
 
 class Fill(BaseModel):
@@ -119,7 +121,9 @@ class DashboardSnapshot(BaseModel):
     engine_status: Literal["running", "paused", "error"]
     mode: Literal["PAPER", "LIVE"]
     open_orders: int
-    beta: float
+    # No beta model exists anywhere in the codebase — null is the honest
+    # answer until one does, rather than a fixed number that looks computed.
+    beta: float | None
 
 
 # ─── Live state hooks (called by main.py's WingA orchestrator) ───────────────
@@ -302,10 +306,23 @@ def get_pnl() -> PnLState:
     realised = sum(p["realised_pnl_usd"] for p in _latest_positions.values())
     unrealised = sum(p["unrealised_pnl_usd"] for p in _latest_positions.values())
     history = [PnLPoint(time=h["time"], value=h["value"]) for h in _pnl_history[-50:]]
+
+    # Cash/equity live on PnLTracker itself (registered via register_components).
+    # Fall back to the configured starting cash if the tracker isn't wired up
+    # yet (e.g. dashboard booted before WingA finished initialising).
+    if _pnl_tracker is not None:
+        cash = _pnl_tracker.cash_usd
+        equity = _pnl_tracker.equity_usd()
+    else:
+        cash = settings.starting_cash_usd
+        equity = settings.starting_cash_usd
+
     return PnLState(
         session=round(realised + unrealised, 2),
         unrealised=round(unrealised, 2),
         realised=round(realised, 2),
+        cash=round(cash, 2),
+        equity=round(equity, 2),
         history=history,
     )
 
@@ -313,11 +330,15 @@ def get_fills(limit: int = 20) -> list[Fill]:
     out = []
     for f in reversed(_latest_fills[-limit:]):
         ts_ms = f.get("timestamp_ms", 0)
+        # taker_side comes straight off Trade::taker_side (see
+        # execution_engine.hpp::trade_to_json) — this used to be hardcoded
+        # "buy" from back when the C++ payload didn't carry a side at all;
+        # that stopped being true once trade_to_json started including it
+        # (pnl/tracker.py was fixed to read it earlier — this call site was missed).
+        raw_side = f.get("taker_side", "BUY")
         out.append(Fill(
             id=str(f.get("trade_id", "")),
-            # C++ fill payload has no side field yet (tracker.py hardcodes "BUY"
-            # too, for the same reason) — a known engine-side simplification.
-            side="buy",
+            side="buy" if raw_side == "BUY" else "sell",
             ticker=f.get("symbol", ""),
             qty=int(f.get("quantity", 0)),
             price=round(f.get("price_bps", 0) / 10_000.0, 2),
@@ -381,7 +402,7 @@ def snapshot():
         engine_status="paused" if (_risk_gate and _risk_gate.is_halted) else "running",
         mode="PAPER",
         open_orders=_order_manager.open_order_count if _order_manager else 0,
-        beta=0.73,   # placeholder — no beta model exists anywhere in the codebase yet
+        beta=None,   # no beta model exists — see DashboardSnapshot.beta comment above
     )
 
 @app.get("/api/orderbook", response_model=OrderBook)

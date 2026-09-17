@@ -10,6 +10,10 @@ function fmt(v: number) {
   return `${sign}$${Math.abs(v).toLocaleString()}`;
 }
 
+function fmtAbs(v: number) {
+  return `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
 export const PnLTracker: React.FC<Props> = ({ data }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -123,6 +127,20 @@ export const PnLTracker: React.FC<Props> = ({ data }) => {
         </div>
       </div>
 
+      {/* Synthetic cash ledger — not a real balance anywhere, just the
+          paper account's own wallet: starts at Settings.starting_cash_usd,
+          moves with each fill. */}
+      <div style={styles.cashRow}>
+        <div style={styles.stat}>
+          <div style={styles.statLabel}>Cash</div>
+          <div style={styles.statVal}>{fmtAbs(data.cash)}</div>
+        </div>
+        <div style={styles.stat}>
+          <div style={styles.statLabel}>Equity</div>
+          <div style={styles.statVal}>{fmtAbs(data.equity)}</div>
+        </div>
+      </div>
+
       {/* Chart */}
       <div style={styles.chartWrap}>
         <canvas
@@ -142,6 +160,12 @@ const styles: Record<string, React.CSSProperties> = {
   statRow: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: 8,
+    marginBottom: 8,
+  },
+  cashRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
     gap: 8,
     marginBottom: 12,
   },

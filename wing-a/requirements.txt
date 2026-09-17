@@ -17,15 +17,20 @@ websocket-client==1.8.0
 psycopg2-binary==2.9.9          # Binary wheel — no libpq-dev needed at runtime
 
 # ── .env file loading — config/settings.py reads secrets/overrides from .env ──
-python-dotenv==1.0.1
+python-dotenv>=1.0.1            # floor, not pin — shared venv also installs apache-airflow (wing-bb), which wants a newer one
 
 # ── FastAPI dashboard backend ─────────────────────────────────────────────────
-fastapi==0.111.0
-uvicorn[standard]==0.29.0       # [standard] includes websockets and httptools
-websockets==12.0                # Required by uvicorn for WS support
+# Floors, not exact pins: this venv is shared with wing-bb, which installs
+# apache-airflow — Airflow 3.x bundles its own FastAPI-based API server and
+# needs a much newer fastapi/starlette/uvicorn/websockets than Wing A alone
+# would. Nothing in dashboard/api.py depends on 0.111.0-specific behaviour,
+# so letting pip resolve to whatever satisfies both sides is safe.
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0       # [standard] includes websockets and httptools
+websockets>=12.0                # Required by uvicorn for WS support
 
 # ── Numerics — position sizing, vol estimation ────────────────────────────────
-numpy==1.26.4
+numpy>=1.26.4
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 python-json-logger==2.0.7       # Structured JSON log lines for CloudWatch

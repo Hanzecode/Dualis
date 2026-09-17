@@ -213,46 +213,53 @@ The entire infrastructure runs locally with zero cloud dependencies, via `docker
 
 ## Getting Started
 
-### 1. Start Docker Services
+There is no mocked/demo mode — every step below runs the real component. If a step fails (no Alpaca key, `yfinance` unreachable, engine not built), it's meant to fail loudly rather than silently substitute fake data.
+
+### 1. Build the C++ engine
 ```bash
-# Starts LocalStack, PostgreSQL, and Airflow
-docker-compose up -d
+cd wing-a/build
+cmake --build .
 ```
 
-### 2. Initialize Databases and S3
+### 2. Generate real signals — Wing B (SQLite by default, no Docker needed)
 ```bash
-# Create the database schema for Wing B
-psql postgresql://quant:quant@localhost:5434/quantcore -f wing-b/db/schema.sql
-
-# Create the S3 bucket for signals, pointed at LocalStack
-aws --endpoint-url=http://localhost:4566 s3 mb s3://quantcore-signals
-```
-
-### 3. Run Wing B (Analytics)
-```bash
-cd wing-b
+cd wing-bb
 pip install -r requirements.txt
+python run_etl.py      # pulls real market data via yfinance/FRED
+python run_score.py    # runs the GradientBoostingRegressor, writes signal JSON
+```
+Set `DATABASE_URL` to point at Postgres instead of the local SQLite file if you want one.
 
-# Trigger DAGs via the Airflow UI at http://localhost:8080
-#   -> wing_b_etl_dag
-#   -> wing_b_score_dag
-# ...or run the scorer directly for a one-off signal batch:
-python -m scoring.scorer
+### 3. Run the C++ engine
+```bash
+cd wing-a/build
+./quantcore
 ```
 
 ### 4. Run Wing A (Execution)
 ```bash
-# Terminal 1 — mock the C++ engine + external feeds
-cd wing-a
-python dev_server.py
-
-# Terminal 2 — run the real Wing A pipeline against the mocks
 cd wing-a
 pip install -r requirements.txt
-python main.py --dev
+# .env with ALPACA_API_KEY / ALPACA_SECRET_KEY (market-data feed only —
+# see the write-up on why $0 account balance is fine for this)
+python main.py
 ```
 
-You should see Wing A ingesting signals from the S3 mock, sizing them in `portfolio/constructor.py`, and printing the orders it sends to the mocked C++ engine — the same path a real signal takes in production, just with synthetic data underneath.
+You should see Wing A ingesting real signals from the local signal directory, sizing them in `portfolio/constructor.py`, running them through `risk/gate.py`, and sending real orders to the real C++ engine over ZMQ.
+
+### Optional: TimescaleDB for fill/position persistence
+```bash
+cd wing-a
+docker-compose up -d timescaledb   # rds_mock and localstack in this file are unused — safe to ignore
+psql postgresql://quant:quant@localhost:5434/quantcore -f db/schema.sql
+```
+`PnLTracker` runs fine without this — it logs a connection error and continues without persistence.
+
+### 5. Dashboard
+```bash
+cd wing-a/dashboard
+npm install && npm run dev
+```
 
 ## Design Decisions Worth Highlighting
 

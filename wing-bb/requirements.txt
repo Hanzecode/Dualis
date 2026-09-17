@@ -19,8 +19,11 @@ shap>=0.44            # per-prediction explanations (valuation page)
 streamlit>=1.30       # the analyst web app
 
 # ── Data sources ───────────────────────────────────────────────────
-yfinance>=0.2         # free price history (falls back to synthetic)
+yfinance>=0.2         # free price history
 fredapi>=0.5          # FRED macro data (needs free FRED_API_KEY env var)
+
+# ── .env file loading — common/config.py reads FRED_API_KEY/DATABASE_URL from .env ──
+python-dotenv>=1.0.1
 
 # ── Messaging (optional locally) ───────────────────────────────────
 redis>=5.0            # instant signal notification to Wing A

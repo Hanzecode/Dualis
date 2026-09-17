@@ -77,7 +77,7 @@ export const WingADashboard: React.FC = () => {
             />
             <Metric
               label="Portfolio β"
-              value={data?.beta.toFixed(2) ?? '—'}
+              value={data?.beta?.toFixed(2) ?? '—'}
               sub="vs SPY"
             />
             <Metric

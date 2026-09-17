@@ -39,6 +39,8 @@ export interface PnLState {
   session: number;
   unrealised: number;
   realised: number;
+  cash: number;
+  equity: number;
   history: PnLPoint[];
 }
 
@@ -105,5 +107,6 @@ export interface DashboardSnapshot {
   engine_status: 'running' | 'paused' | 'error';
   mode: 'PAPER' | 'LIVE';
   open_orders: number;
-  beta: number;
+  // No beta model exists in the codebase yet — null, not a fabricated number.
+  beta: number | null;
 }

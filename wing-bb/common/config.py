@@ -11,6 +11,17 @@ them in ONE place. Change it here, and the whole system updates.
 # outside the program (the terminal, Docker, or Kubernetes Secrets).
 import os
 
+# Load variables from wing-bb/.env into the process environment before
+# any os.getenv() call below runs, so a key sitting in .env is actually
+# picked up instead of silently doing nothing. Mirrors wing-a/config/
+# settings.py's load_dotenv() — wing-b never had this, so a real
+# FRED_API_KEY in .env was never reaching os.getenv("FRED_API_KEY").
+# A real exported shell var still takes precedence — load_dotenv()
+# never overrides one that's already set.
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 # ── Database location ─────────────────────────────────────────────
 # os.getenv("NAME", default) reads the environment variable NAME.
 # If it doesn't exist, it falls back to the default after the comma.
@@ -33,6 +44,16 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))  # int() because env vars are 
 # If it's missing, the ETL generates synthetic macro series instead,
 # so the project still runs without any signup.
 FRED_API_KEY = os.getenv("FRED_API_KEY", "")
+
+# ── Synthetic data fallback ────────────────────────────────────────
+# fetch_prices()/fetch_macro() can fall back to a fake random-walk
+# dataset when the real source (yfinance/FRED) fails. That's useful
+# for a demo, but dangerous while you're actually testing the system —
+# a real outage gets silently replaced with plausible-looking fake
+# data instead of surfacing as a bug. Off by default: a real failure
+# now raises. Set to "true" only when you deliberately want the old
+# always-runs demo behaviour back.
+ALLOW_SYNTHETIC_DATA = os.getenv("ALLOW_SYNTHETIC_DATA", "false").lower() == "true"
 
 # Which FRED series we track. Keys are FRED's official series IDs;
 # values are the human-readable names shown on the dashboard.

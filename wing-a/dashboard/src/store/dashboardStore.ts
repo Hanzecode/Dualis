@@ -1,8 +1,6 @@
 import { create } from 'zustand';
 import type { DashboardSnapshot } from '../types';
-import { fetchSnapshot, getMockSnapshot } from '../api/client';
-
-const MOCK = import.meta.env.VITE_MOCK === 'true';
+import { fetchSnapshot } from '../api/client';
 
 interface DashboardStore {
   data: DashboardSnapshot | null;
@@ -32,16 +30,16 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   refresh: async () => {
     set({ loading: true, error: null });
     try {
-      const data = MOCK ? getMockSnapshot() : await fetchSnapshot();
+      const data = await fetchSnapshot();
       set({ data, loading: false, lastUpdated: new Date() });
     } catch (err) {
-      // Graceful fallback to mock if API unreachable
-      const data = getMockSnapshot();
+      // Fail loudly: keep whatever real data is already on screen (or
+      // null, if this is the first fetch), surface the real error, and
+      // do NOT paper over it with fabricated numbers. A blank/error
+      // dashboard is the correct signal that something upstream is down.
       set({
-        data,
         loading: false,
-        error: `API unreachable — showing mock data (${err instanceof Error ? err.message : 'unknown'})`,
-        lastUpdated: new Date(),
+        error: `API unreachable: ${err instanceof Error ? err.message : 'unknown error'}`,
       });
     }
   },

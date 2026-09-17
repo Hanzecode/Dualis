@@ -104,6 +104,12 @@ class PnLTracker:
             sym: PositionState(symbol=sym) for sym in cfg.symbols
         }
 
+        # Synthetic cash ledger — not backed by any real account. Starts at
+        # cfg.starting_cash_usd and moves only in on_fill(): a BUY fill debits
+        # qty × price, a SELL fill credits it. This is the "wallet" half of
+        # the accounting; PositionState above is the "holdings" half.
+        self._cash_usd: float = cfg.starting_cash_usd
+
         # TimescaleDB connection for persistence
         self._db_conn: Optional[psycopg2.extensions.connection] = None
         self._connect_db()
@@ -125,27 +131,24 @@ class PnLTracker:
 
         pos = self._positions[symbol]
 
-        # Determine side from context
-        # The C++ fill doesn't include side directly — we infer from taker context
-        # In production: add side to the Trade struct (see audit gaps)
-        # For now: derive from position change direction
-        # We use maker_order_id/taker_order_id to look up what we submitted
-        # Simplified: assume we are always the taker
-        # The fill quantity is always positive; side determined by our last order
-        # This is a known simplification — see pending_taker_sides_ audit note
-
-        # Update position state
-        # We track side through ManagedOrder in OrderManager in production
-        # Here we use a simplified approach: check our current position direction
-        side = "BUY"   # Simplified — see note above
+        # taker_side now comes straight off Trade::taker_side (see
+        # execution_engine.hpp::trade_to_json) — the earlier "always assume
+        # BUY" simplification predates that field existing on the wire.
+        side = fill.get("taker_side", "BUY")
         realised_bps = pos.apply_fill(side, qty, fill_price_bps)
         realised_usd = realised_bps / 10_000.0
         unrealised_usd = pos.unrealised_pnl_bps / 10_000.0
 
+        # Cash ledger: a BUY spends cash, a SELL raises it. Purely synthetic —
+        # see Settings.starting_cash_usd — but it now moves the same direction
+        # a real brokerage account would.
+        fill_notional_usd = qty * (fill_price_bps / 10_000.0)
+        self._cash_usd += -fill_notional_usd if side == "BUY" else fill_notional_usd
+
         logger.info(
-            "[%s] Fill: qty=%d price=$%.2f realised=$%.2f pos=%d",
-            symbol, qty, fill_price_bps / 10_000,
-            realised_usd, pos.net_quantity
+            "[%s] Fill: side=%s qty=%d price=$%.2f realised=$%.2f pos=%d cash=$%.2f",
+            symbol, side, qty, fill_price_bps / 10_000,
+            realised_usd, pos.net_quantity, self._cash_usd
         )
 
         # Persist to TimescaleDB
@@ -172,6 +175,24 @@ class PnLTracker:
 
     def get_position(self, symbol: str) -> Optional[PositionState]:
         return self._positions.get(symbol)
+
+    @property
+    def cash_usd(self) -> float:
+        """Remaining synthetic cash — starts at cfg.starting_cash_usd."""
+        return self._cash_usd
+
+    def equity_usd(self) -> float:
+        """
+        Cash still sitting there + the mark-to-market value of every
+        holding. Should always equal starting_cash_usd + total_pnl_usd() —
+        that identity is the sanity check that the cash ledger and the
+        mark-to-market ledger agree with each other.
+        """
+        market_value = sum(
+            p.net_quantity * (p.last_price_bps or p.avg_cost_bps) / 10_000.0
+            for p in self._positions.values()
+        )
+        return self._cash_usd + market_value
 
     # ── Database ──────────────────────────────────────────────────────────────
 

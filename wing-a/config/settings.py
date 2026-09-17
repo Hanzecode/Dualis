@@ -48,7 +48,7 @@ class SignalConfig:
     )
 
     # How often to poll the signal directory for new files (seconds)
-    poll_interval_s: int = 60
+    poll_interval_s: int = 10
 
     # Reject signals older than this (seconds) — prevents acting on stale data
     max_signal_age_s: int = 300   # 5 minutes
@@ -133,6 +133,15 @@ class Settings:
     risk:      RiskConfig      = field(default_factory=RiskConfig)
     portfolio: PortfolioConfig = field(default_factory=PortfolioConfig)
     db:        DatabaseConfig  = field(default_factory=DatabaseConfig)
+
+    # Synthetic starting cash for the paper ledger — not a real balance
+    # anywhere (Alpaca, a bank, etc.), just the number PnLTracker's cash
+    # account starts counting down from. See PnLTracker.cash_usd.
+    # Kept at $50k to match RiskConfig.max_total_notional_usd below (100%
+    # deployment against this balance) rather than resizing the risk limits
+    # themselves — see the interview-prep discussion for why that's the
+    # simpler of the two ways to keep everything internally consistent.
+    starting_cash_usd: float = float(os.getenv("STARTING_CASH_USD", "50000"))
 
     @property
     def s3(self) -> SignalConfig:

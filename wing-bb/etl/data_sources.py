@@ -6,10 +6,11 @@ internet and your system. Everything downstream (ETL, models,
 dashboard) consumes what this file brings in.
 
 Design choice worth understanding:
-We try to download REAL data via yfinance, but if that fails (no
-internet, rate limits, no API key) we fall back to generating
-realistic SYNTHETIC data. This means the whole project always runs —
-crucial when you're learning, demoing, or running tests in CI.
+We try to download REAL data via yfinance. If that fails, the default
+is to raise — a real outage should be a loud, visible failure, not a
+silent swap to fake data that lets the pipeline "succeed" on garbage.
+Set ALLOW_SYNTHETIC_DATA=true (common/config.py) to opt back into the
+old always-runs-on-fake-data behaviour for demos/CI.
 """
 
 # Standard library imports first (Python convention).
@@ -17,7 +18,10 @@ import numpy as np            # fast numerical arrays — used for synthetic dat
 import pandas as pd           # DataFrames — yfinance returns these
 
 # Our own settings.
-from common.config import SECTOR_UNIVERSE, HISTORY_PERIOD, FRED_API_KEY, FRED_SERIES
+from common.config import (
+    SECTOR_UNIVERSE, HISTORY_PERIOD, FRED_API_KEY, FRED_SERIES,
+    ALLOW_SYNTHETIC_DATA,
+)
 
 
 def fetch_prices() -> pd.DataFrame:
@@ -66,8 +70,17 @@ def fetch_prices() -> pd.DataFrame:
         # ignore_index=True renumbers rows 0..N cleanly.
         return pd.concat(frames, ignore_index=True)
 
-    except Exception as exc:  # noqa: BLE001 — broad on purpose: ANY failure → synthetic
-        print(f"[data_sources] live fetch failed ({exc}); generating synthetic data")
+    except Exception as exc:
+        if not ALLOW_SYNTHETIC_DATA:
+            raise RuntimeError(
+                "fetch_prices(): live yfinance fetch failed and "
+                "ALLOW_SYNTHETIC_DATA is not set — refusing to silently "
+                "substitute fake price data. Fix the real data source, "
+                "or set ALLOW_SYNTHETIC_DATA=true if this is a deliberate "
+                "offline/demo run."
+            ) from exc
+        print(f"[data_sources] live fetch failed ({exc}); generating synthetic data "
+              f"(ALLOW_SYNTHETIC_DATA=true)")
         return _synthetic_prices()
 
 
@@ -205,11 +218,18 @@ def fetch_macro() -> pd.DataFrame:
     Returns long format: obs_date | series_id | series_name | value.
 
     FRED needs a free API key (see config.py). With no key, or any
-    network failure, we generate plausible synthetic series so the
-    macro panel always has something to show.
+    network failure, this raises unless ALLOW_SYNTHETIC_DATA is set —
+    see the module docstring for why silent fallback is off by default.
     """
-    # Only attempt the real fetch if a key is configured.
-    if FRED_API_KEY:
+    if not FRED_API_KEY:
+        if not ALLOW_SYNTHETIC_DATA:
+            raise RuntimeError(
+                "fetch_macro(): FRED_API_KEY is not set — refusing to "
+                "silently substitute fake macro data. Set FRED_API_KEY "
+                "(free key at fred.stlouisfed.org), or ALLOW_SYNTHETIC_DATA=true "
+                "if this is a deliberate offline/demo run."
+            )
+    else:
         try:
             # fredapi wraps FRED's REST API in one friendly class.
             from fredapi import Fred
@@ -230,10 +250,17 @@ def fetch_macro() -> pd.DataFrame:
             # FRED uses NaN for market holidays — drop those rows.
             return df.dropna(subset=["value"])
 
-        except Exception as exc:  # noqa: BLE001
-            print(f"[data_sources] FRED fetch failed ({exc}); using synthetic macro")
+        except Exception as exc:
+            if not ALLOW_SYNTHETIC_DATA:
+                raise RuntimeError(
+                    "fetch_macro(): live FRED fetch failed and "
+                    "ALLOW_SYNTHETIC_DATA is not set — refusing to silently "
+                    "substitute fake macro data."
+                ) from exc
+            print(f"[data_sources] FRED fetch failed ({exc}); using synthetic macro "
+                  f"(ALLOW_SYNTHETIC_DATA=true)")
 
-    # ── Synthetic fallback ─────────────────────────────────────────
+    # ── Synthetic fallback (ALLOW_SYNTHETIC_DATA=true only) ─────────
     rng = np.random.default_rng(seed=11)
     dates = pd.bdate_range(end=pd.Timestamp.today(), periods=504)
 

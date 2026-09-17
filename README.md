@@ -46,14 +46,12 @@ graph TD
         ANALYST["dashboard/pages/5_signal_publisher.py<br/>human analyst UI"]
         PGSIG[("SQLite: analyst_signals<br/>audit trail")]
         WRITER["common/signal_writer.py<br/>validate + serialize to contract"]
-        REDIS[["Redis PUBLISH<br/>'doorbell' notification"]]
 
         ETL --> SCOREDAG
         SCOREDAG --> SCORER
         SCORER --> WRITER
         ANALYST --> PGSIG
         ANALYST --> WRITER
-        WRITER --> REDIS
     end
 
     S3[("S3 bucket / LocalStack<br/>signals/*.json — the contract")]

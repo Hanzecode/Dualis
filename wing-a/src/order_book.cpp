@@ -391,6 +391,7 @@ void OrderBook::execute_fill(Order &maker, Order &taker, uint32_t fill_qty) {
       .maker_order_id = maker.order_id,
       .taker_order_id = taker.order_id,
       .taker_side = taker.side, // FIX: record taker side at the fill point
+      .our_side = taker.is_synthetic ? maker.side : taker.side,
       .symbol = symbol_,
       .price_bps = maker.price_bps,
       .quantity = fill_qty,

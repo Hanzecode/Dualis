@@ -61,6 +61,11 @@ struct Order {
                  // timestamps (steady_clock starts from boot, not Unix epoch —
                  // wrong for absolute times)
 
+  // True only for the market-side order BookRouter injects when a live quote
+  // crosses one of OUR resting orders. It stands in for an external
+  // counterparty, so it is never "us" — see Trade::our_side.
+  bool is_synthetic = false;
+
   // Remaining quantity to fill — computed on the fly, not stored (derived data)
   // 'const' member function = does not modify *this; callable on const Order&
   [[nodiscard]] uint32_t remaining() const {
@@ -90,6 +95,12 @@ struct Trade {
                    // submissions. The matching engine knows taker_side at fill
                    // time (it has the taker Order in hand) — recording it here
                    // is the clean fix.
+  Side our_side;   // Side of OUR position change. taker_side is the aggressor,
+                   // which for a crossing fill is the synthetic market order —
+                   // i.e. the OPPOSITE of what we did. Consumers tracking our
+                   // position/cash/PnL must use this, not taker_side. (If both
+                   // orders are real it is the taker's side; that self-trade
+                   // is net-zero for us, and is not modelled separately.)
   std::string symbol;
   int64_t price_bps; // Price at which the trade executed
   uint32_t quantity; // Number of shares/contracts exchanged

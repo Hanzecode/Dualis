@@ -402,6 +402,29 @@ class TestPnLTracker:
             )
         return tracker, pos_updates, pnl_updates
 
+    def test_cash_and_position_follow_our_side_not_taker_side(self):
+        """
+        In this engine the taker is the synthetic market order crossing our
+        resting limit, so taker_side is the OPPOSITE of what we did. Cash and
+        position must follow our_side.
+        """
+        tracker, _, _ = self._make_tracker()
+        start = tracker.cash_usd
+
+        # We BOUGHT 100 @ $189 (our resting BUY was hit by a synthetic SELL).
+        buy = make_fill("AAPL", qty=100, price_bps=1_890_000, trade_id=1)
+        buy.update(taker_side="SELL", our_side="BUY")
+        tracker.on_fill(buy)
+        assert tracker.get_position("AAPL").net_quantity == 100
+        assert tracker.cash_usd == start - 18_900
+
+        # We SOLD 40 @ $190 (our resting SELL was lifted by a synthetic BUY).
+        sell = make_fill("AAPL", qty=40, price_bps=1_900_000, trade_id=2)
+        sell.update(taker_side="BUY", our_side="SELL")
+        tracker.on_fill(sell)
+        assert tracker.get_position("AAPL").net_quantity == 60
+        assert tracker.cash_usd == start - 18_900 + 7_600
+
     def test_first_fill_opens_position(self):
         """A fill on a flat position opens a new long position."""
         tracker, pos_updates, _ = self._make_tracker()

@@ -85,10 +85,8 @@ After a fill, the `RiskManager` is notified via a callback to update its interna
 The Wing B analytics pipeline uses machine learning to identify trading opportunities. The models are trained on fundamental and market data, and their insights are used to generate signals.
 
 *   **Valuation Model**: A `GradientBoostingRegressor` model (from `scikit-learn` with 200 estimators) is trained to predict a "fair" P/E ratio for a stock based on its growth, margin, and momentum. Stocks trading at a significant discount to their predicted fair P/E are flagged as potential "buy" opportunities.
-*   **Factor Model**: A linear regression analyzes each sector's returns against systematic market factors (e.g., overall market movement, momentum). This decomposes returns to find "alpha"—the portion not explained by common factors.
-*   **Clustering**: Instead of relying on official sector labels, a `PCA` -> `K-Means` pipeline groups stocks by their fundamental *similarity*. This can uncover relative value opportunities between stocks that are numerically similar but priced very differently.
 
-These analytics run on a schedule (e.g., via Airflow), and the resulting signals are published to an S3 bucket, where they can be consumed by the trading logic.
+This runs on a loop (`while true; do python run_score.py; sleep 30; done`), and the resulting signals are written to a local signal directory, where Wing A polls and consumes them.
 
 ### 4. TWAP Order Execution
 

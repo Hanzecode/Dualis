@@ -307,6 +307,7 @@ inline void BookRouter::on_market_depth(Side side, int64_t price_bps,
       synthetic.type = OrderType::MARKET;
       synthetic.price_bps = 0; // Ignored by match_market — fills at maker price.
       synthetic.quantity = qty;
+      synthetic.is_synthetic = true; // stands in for the external market
       submit(std::move(synthetic)); // → OrderBook::submit → match_market → execute_fill
     }
   } else {
@@ -318,6 +319,7 @@ inline void BookRouter::on_market_depth(Side side, int64_t price_bps,
       synthetic.type = OrderType::MARKET;
       synthetic.price_bps = 0;
       synthetic.quantity = qty;
+      synthetic.is_synthetic = true; // stands in for the external market
       submit(std::move(synthetic));
     }
   }

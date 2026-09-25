@@ -131,10 +131,11 @@ class PnLTracker:
 
         pos = self._positions[symbol]
 
-        # taker_side now comes straight off Trade::taker_side (see
-        # execution_engine.hpp::trade_to_json) — the earlier "always assume
-        # BUY" simplification predates that field existing on the wire.
-        side = fill.get("taker_side", "BUY")
+        # our_side (execution_engine.hpp::trade_to_json) is the side of OUR
+        # position change. NOT taker_side: in this engine the taker is the
+        # synthetic market order that crosses our resting limit, i.e. the
+        # opposite of what we did. Missing key defaults to BUY (old payloads).
+        side = fill.get("our_side", "BUY")
         realised_bps = pos.apply_fill(side, qty, fill_price_bps)
         realised_usd = realised_bps / 10_000.0
         unrealised_usd = pos.unrealised_pnl_bps / 10_000.0

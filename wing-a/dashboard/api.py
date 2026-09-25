@@ -330,12 +330,9 @@ def get_fills(limit: int = 20) -> list[Fill]:
     out = []
     for f in reversed(_latest_fills[-limit:]):
         ts_ms = f.get("timestamp_ms", 0)
-        # taker_side comes straight off Trade::taker_side (see
-        # execution_engine.hpp::trade_to_json) — this used to be hardcoded
-        # "buy" from back when the C++ payload didn't carry a side at all;
-        # that stopped being true once trade_to_json started including it
-        # (pnl/tracker.py was fixed to read it earlier — this call site was missed).
-        raw_side = f.get("taker_side", "BUY")
+        # our_side = side of OUR position change (taker_side is the synthetic
+        # market order crossing our resting limit — the opposite of ours).
+        raw_side = f.get("our_side", "BUY")
         out.append(Fill(
             id=str(f.get("trade_id", "")),
             side="buy" if raw_side == "BUY" else "sell",

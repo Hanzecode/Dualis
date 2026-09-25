@@ -12,7 +12,7 @@ SQLAlchemy>=2.0       # database toolkit; SQLite local, Postgres in prod
 # psycopg2-binary     # UNCOMMENT when pointing DATABASE_URL at PostgreSQL
 
 # ── Machine learning ───────────────────────────────────────────────
-scikit-learn>=1.3     # regression, PCA, K-Means, gradient boosting
+scikit-learn>=1.3     # GradientBoostingRegressor for the valuation model
 shap>=0.44            # per-prediction explanations (valuation page)
 
 # ── Dashboard ──────────────────────────────────────────────────────

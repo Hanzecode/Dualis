@@ -103,7 +103,7 @@ public:
 
   // ── Post-trade update ────────────────────────────────────────────────────
   // Call this from the trade callback after each fill executes.
-  void on_trade(const Trade &trade, Side taker_side);
+  void on_trade(const Trade &trade, Side our_side);
 
   // ── Position queries ─────────────────────────────────────────────────────
   [[nodiscard]] const Position *get_position(const std::string &symbol) const;
@@ -210,9 +210,9 @@ inline RiskManager::CheckResult RiskManager::check(const Order &order) const {
   return {RejectionReason::APPROVED}; // All checks passed
 }
 
-inline void RiskManager::on_trade(const Trade &trade, Side taker_side) {
-  // Determine the quantity delta from the TAKER's perspective
-  int32_t taker_delta = (taker_side == Side::BUY)
+inline void RiskManager::on_trade(const Trade &trade, Side our_side) {
+  // Delta from OUR perspective (Trade::our_side), not the aggressor's
+  int32_t taker_delta = (our_side == Side::BUY)
                             ? static_cast<int32_t>(trade.quantity)
                             : -static_cast<int32_t>(trade.quantity);
 

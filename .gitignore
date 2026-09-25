@@ -32,6 +32,7 @@ wing-bb/wing_b_local.db
 # OS / editor
 .DS_Store
 **/.DS_Store
+.vscode/
 
 # Misc caches
 .cache/

@@ -31,7 +31,7 @@ st.set_page_config(
 st.title("Wing B — sector analyst platform")
 st.markdown(
     "Use the sidebar to navigate: sector overview, screener, "
-    "factor explorer, valuation model, and the signal publisher "
+    "valuation model, and the signal publisher "
     "that feeds ideas back into Wing A."
 )
 

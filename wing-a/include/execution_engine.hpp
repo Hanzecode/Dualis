@@ -311,7 +311,7 @@ inline void ExecutionEngine::on_trade(const Trade &trade,
                                       const std::string &symbol) {
   // taker_side now read directly from trade.taker_side — set in execute_fill()
   // which has the taker Order in hand. No more pending_taker_sides_ lookup.
-  risk_.on_trade(trade, trade.taker_side); // Post-trade: position + PnL update
+  risk_.on_trade(trade, trade.our_side);   // Post-trade: OUR position + PnL update
   publish_fill(trade, symbol);             // ZMQ PUB → Python dashboard
   persist_trade(trade, symbol);            // TimescaleDB via PgPool
 }
@@ -383,6 +383,7 @@ ExecutionEngine::trade_to_json(const Trade &trade,
                       .count();
 
   const char *side_str = (trade.taker_side == Side::BUY) ? "BUY" : "SELL";
+  const char *our_side_str = (trade.our_side == Side::BUY) ? "BUY" : "SELL";
 
   std::ostringstream ss;
   ss << "{"
@@ -392,6 +393,7 @@ ExecutionEngine::trade_to_json(const Trade &trade,
      << "\"price_dollars\":" << (trade.price_bps / 10000.0) << ","
      << "\"quantity\":" << trade.quantity << ","
      << "\"taker_side\":\"" << side_str << "\","
+     << "\"our_side\":\"" << our_side_str << "\","
      << "\"maker_order_id\":" << trade.maker_order_id << ","
      << "\"taker_order_id\":" << trade.taker_order_id << ","
      << "\"timestamp_ms\":" << epoch_ms << "}";

@@ -1,0 +1,10 @@
+# ansible/inventory.ini.example
+#
+# The real inventory.ini is generated automatically by `terraform apply`
+# (see terraform/main.tf's local_file.ansible_inventory) — you shouldn't
+# need to write one by hand. This file just shows what that generated file
+# looks like, for reference, and so this directory isn't empty before you've
+# run Terraform yet.
+
+[dualis]
+203.0.113.10 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa

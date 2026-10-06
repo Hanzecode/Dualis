@@ -1,0 +1,121 @@
+---
+# ansible/playbook.yml — takes a fresh Ubuntu VM (from terraform/) and turns
+# it into a running copy of the Dualis stack. Idempotent: re-running this
+# against an already-configured VM is safe — every task either changes
+# nothing if it's already done, or picks up where a previous run left off.
+
+- name: Deploy Dualis
+  hosts: dualis
+  become: true
+
+  vars:
+    repo_url: https://github.com/Hanzecode/Dualis.git
+    app_dir: /opt/dualis
+
+  tasks:
+    - name: Wait for the VM to actually be reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 120
+      become: false
+
+    # A brand-new Ubuntu VM runs first-boot setup (and apt housekeeping) for
+    # its first minute or two and holds the apt lock while it does — without
+    # this, the first apt task below can fail with "could not get lock".
+    - name: Wait for first-boot cloud-init to finish
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        lock_timeout: 180
+
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - git
+        state: present
+        lock_timeout: 180
+
+    - name: Create the apt keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    # Docker's own documented install method: fetch the key, de-armor it into
+    # /etc/apt/keyrings, and reference it by path in the repo definition
+    # below — the modern replacement for the now-deprecated apt_key module.
+    - name: Fetch and de-armor Docker's GPG key
+      ansible.builtin.shell: |
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Add the Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
+          signed-by=/etc/apt/keyrings/docker.gpg]
+          https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        state: present
+        filename: docker
+
+    - name: Install Docker Engine and the Compose plugin
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        lock_timeout: 180
+
+    - name: Let the ubuntu user run docker without sudo
+      ansible.builtin.user:
+        name: ubuntu
+        groups: docker
+        append: true
+
+    - name: Clone (or update) the Dualis repo
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: true # overwrite local changes — this box only ever runs what's in git
+
+    # Secrets are never committed to the repo, so they can't come from the
+    # git clone above. Instead, copy them from wherever THIS playbook is
+    # being run from (your own machine) straight to the VM over the
+    # existing SSH connection — they never touch Terraform state or the
+    # Ansible playbook itself.
+    - name: Copy Wing A's .env (Alpaca keys)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../wing-a/.env"
+        dest: "{{ app_dir }}/wing-a/.env"
+        mode: "0600"
+
+    - name: Copy Wing B's .env (FRED key)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../wing-bb/.env"
+        dest: "{{ app_dir }}/wing-bb/.env"
+        mode: "0600"
+
+    - name: Build and start the full stack
+      ansible.builtin.command:
+        cmd: docker compose up -d --build
+        chdir: "{{ app_dir }}"
+
+    - name: Confirm the dashboard API is answering
+      ansible.builtin.uri:
+        url: http://localhost:8000/api/snapshot
+        status_code: 200
+      register: health
+      retries: 10
+      delay: 5
+      until: health.status == 200

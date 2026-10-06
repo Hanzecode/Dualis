@@ -1,0 +1,12 @@
+build/
+.cache/
+logs/
+__pycache__/
+*.pyc
+test_python/__pycache__/
+dashboard/node_modules/
+dashboard/dist/
+.git/
+.gitignore
+.env
+.vscode/

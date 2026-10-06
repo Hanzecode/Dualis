@@ -26,11 +26,16 @@ load_dotenv()
 class ZmqConfig:
     # C++ engine PULL socket — we PUSH orders to this address
     # C++ engine binds (listens); we connect (send)
-    push_endpoint: str = "tcp://localhost:5557"
+    # "localhost" only resolves correctly when both processes are on the
+    # same host. Running the engine in its own container (see docker/)
+    # means this must instead point at the engine's service name — set
+    # ZMQ_ENGINE_HOST=engine in that environment; unset/local runs keep
+    # the localhost default unchanged.
+    push_endpoint: str = f"tcp://{os.getenv('ZMQ_ENGINE_HOST', 'localhost')}:5557"
 
     # C++ engine PUB socket — we SUB to receive fills
     # C++ engine binds; we connect and subscribe
-    sub_endpoint: str = "tcp://localhost:5556"
+    sub_endpoint: str = f"tcp://{os.getenv('ZMQ_ENGINE_HOST', 'localhost')}:5556"
 
     # Fill subscription topic — must match "fills " prefix in execution_engine.hpp
     fill_topic: str = "fills"

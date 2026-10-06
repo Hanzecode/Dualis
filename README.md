@@ -240,15 +240,35 @@ The C++ side also tracks positions and realised PnL from fills (`on_trade`, usin
 
 ## Optional Infrastructure
 
-Nothing is required to run the system. For fill/position persistence, `wing-a/docker-compose.yml` provides a `timescaledb` service (host port 5434):
+Nothing is required to run the system directly on your machine (see Getting Started). Two optional layers sit on top.
+
+### Run everything in containers (Docker Compose)
+
+The root `docker-compose.yml` runs the whole stack — the C++ engine, Wing A's Python process (including the dashboard API on port 8000), Wing B's ETL-then-score loop, and TimescaleDB:
 
 ```bash
-cd wing-a
-docker-compose up -d timescaledb
-psql postgresql://quant:quant@localhost:5434/quantcore -f db/schema.sql
+docker compose up --build
 ```
 
-The `rds_mock` and `localstack` services in that file are leftovers and are unused. Persistence happens in Python (`PnLTracker`); the C++ `persist_trade()` / `pg_pool.hpp` path is not wired up.
+- The C++ engine is a multi-stage build (`wing-a/docker/engine.Dockerfile`): a full toolchain image compiles it, and only the binary and its runtime libraries are copied into the final image.
+- Each container has its own filesystem, so Wing B and Wing A share the signal files through a named volume (`signals`, mounted at `/data`). Wing A reaches the engine by service name (`ZMQ_ENGINE_HOST=engine`) instead of `localhost`.
+- Secrets are read from the existing `wing-a/.env` and `wing-bb/.env`; they are not baked into any image.
+- The React dashboard is not containerized; run it on the host (`npm run dev`) and it talks to port 8000.
+
+To run only the database (for persistence while running everything else directly): `docker compose up -d timescaledb`, then `psql postgresql://quant:quant@localhost:5434/quantcore -f wing-a/db/schema.sql`. Persistence happens in Python (`PnLTracker`); the C++ `persist_trade()` / `pg_pool.hpp` path is not wired up.
+
+### Deploy to AWS (Terraform + Ansible)
+
+`terraform/` provisions one EC2 instance and a security group (SSH and the dashboard API, restricted to a CIDR you supply) and writes `ansible/inventory.ini`; `ansible/playbook.yml` then installs Docker on that instance, clones this repo, copies the two `.env` files over SSH, and runs `docker compose up -d --build`. AWS credentials come from the standard credential chain (`aws configure`), never from the `.tf` files.
+
+```bash
+cd terraform
+terraform plan  -var="allowed_cidr=$(curl -s https://checkip.amazonaws.com)/32"
+terraform apply -var="allowed_cidr=$(curl -s https://checkip.amazonaws.com)/32"
+cd ../ansible && ansible-playbook playbook.yml
+```
+
+Status: the Terraform configuration is validated (`terraform validate`) and the Docker stack has been run end to end locally, but the AWS deployment itself has not yet been applied against a real account. Run `terraform destroy` with the same variables when you are done to stop paying for the instance.
 
 ## Getting Started
 
@@ -314,7 +334,7 @@ streamlit run wing-bb/dashboard/app.py
 
 ## Design Decisions Worth Highlighting
 
-- **Two order-book representations, not one.** `order_book.cpp` (tree-based) handles correctness-critical order lifecycle and matching; `flat_order_book.hpp` (array-based) exists so price-discovery reads are O(1) instead of an O(log n) tree traversal on the hot path. `BookRouter` keeps them in sync — and that sync is where a real bug lived: quote updates only touched the flat book, so resting orders never filled until the crossing check was added.
+- **Two order-book representations, not one.** `order_book.cpp` (tree-based) handles correctness-critical order lifecycle and matching; `flat_order_book.hpp` (array-based) keeps per-price-level quantity for market-depth updates, where every update is a single allocation-free array write (measured ~4 ns, versus ~120–200 ns for the tree, which has to allocate a node and record each order). Reading the best bid is about 1 ns in both — the tree's is also a constant-time `begin()` — so the split pays off on updates, not reads. `BookRouter` keeps them in sync — and that sync is where a real bug lived: quote updates only touched the flat book, so resting orders never filled until the crossing check was added.
 - **Two file/socket boundaries for two different jobs.** A polled file directory decouples research from execution (restart-tolerant, inspectable, no broker to run); ZeroMQ is reserved for the latency-sensitive Python↔C++ path, with PUSH/PULL where delivery matters (orders) and PUB/SUB where it's a broadcast (fills).
 - **Polling over push for signals.** Slower than a push, but Wing A can be offline or restarted without Wing B knowing, and every signal is a file you can open and read.
 - **Defence in depth on risk.** Two gates in two languages rather than one, so the last check doesn't rely on every upstream caller behaving.

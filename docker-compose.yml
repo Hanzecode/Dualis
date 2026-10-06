@@ -1,0 +1,92 @@
+# docker-compose.yml — the full containerized Dualis stack.
+#
+# This is separate from wing-a/docker-compose.yml, which only ever ran
+# TimescaleDB (see that file's own header, and README.md's "Optional
+# Infrastructure" section) — everything else was run directly on the host.
+# This file containerizes the actual application: the C++ engine, Wing A's
+# Python process, and Wing B's ETL+scoring loop, all four services wired
+# together the same way they already talk to each other outside Docker —
+# ZeroMQ between the engine and Wing A, a shared signal directory between
+# Wing B and Wing A, TimescaleDB for persistence.
+#
+# The React dashboard (wing-a/dashboard) is NOT containerized here — run it
+# on the host with `npm run dev`, pointed at http://localhost:8000, which
+# this stack exposes below.
+#
+# Usage:
+#   docker compose up --build       # build + start everything
+#   docker compose logs -f wing-a   # tail one service
+#   docker compose down -v          # stop and wipe the timescaledb volume
+
+version: "3.9"
+
+services:
+
+  # ── TimescaleDB — same service wing-a/docker-compose.yml documents as
+  # optional for a non-Docker run; here it's just another container on the
+  # same network as everything else. ─────────────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_USER: quant
+      POSTGRES_PASSWORD: quant
+      POSTGRES_DB: quantcore
+    ports:
+      - "5434:5432"          # host access for psql, same port as before
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./wing-a/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant -d quantcore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── The C++ matching engine ──────────────────────────────────────────────
+  engine:
+    build:
+      context: ./wing-a
+      dockerfile: docker/engine.Dockerfile
+    ports:
+      - "5556:5556"   # PUB — fills out (host access for debugging)
+      - "5557:5557"   # PULL — orders + market depth in
+
+  # ── Wing A: Python order sizing, risk gate, TWAP, and the dashboard API ──
+  wing-a:
+    build:
+      context: ./wing-a
+      dockerfile: docker/python.Dockerfile
+    depends_on:
+      engine:
+        condition: service_started
+      timescaledb:
+        condition: service_healthy
+    env_file:
+      - ./wing-a/.env      # ALPACA_API_KEY / ALPACA_SECRET_KEY
+    environment:
+      ZMQ_ENGINE_HOST: engine                                        # see config/settings.py
+      TIMESCALE_URL: postgresql://quant:quant@timescaledb:5432/quantcore
+      LOCAL_SIGNAL_DIR: /data/signals   # note the /signals suffix — see wing-b's LOCAL_SIGNAL_DIR below
+    volumes:
+      - signals:/data
+    ports:
+      - "8000:8000"   # FastAPI dashboard API — point the host-run React dashboard here
+
+  # ── Wing B: ETL once, then score on a loop (docker/entrypoint.sh) ────────
+  wing-b:
+    build:
+      context: ./wing-bb
+      dockerfile: docker/python.Dockerfile
+    env_file:
+      - ./wing-bb/.env     # FRED_API_KEY
+    environment:
+      LOCAL_SIGNAL_DIR: /data          # signal_writer.py appends "signals/<source>/..." itself
+      SCORE_INTERVAL_S: "30"
+      ALLOW_SYNTHETIC_DATA: "false"    # same "fail loudly, don't fake data" default as local runs
+    volumes:
+      - signals:/data
+
+volumes:
+  timescaledb_data:
+  signals:      # shared between wing-b (writer) and wing-a (poller) — the same
+                # file-based contract these two processes already use outside Docker

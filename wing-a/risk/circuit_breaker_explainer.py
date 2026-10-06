@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-import requests    # pip install requests  (already in requirements.txt via uvicorn)
+import requests    # pip install requests — see requirements.txt (calls the Claude API for post-mortems)
 
 from config.settings import Settings, settings as default_settings
 

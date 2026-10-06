@@ -32,6 +32,12 @@ websockets>=12.0                # Required by uvicorn for WS support
 # ── Numerics — position sizing, vol estimation ────────────────────────────────
 numpy>=1.26.4
 
+# ── HTTP client — risk/circuit_breaker_explainer.py calls the Claude API ──────
+# Was missing here — only worked locally because the shared venv also installs
+# wing-bb's requirements.txt, which pulls it in transitively (yfinance et al.).
+# Containerizing wing-a on its own (docker/python.Dockerfile) surfaced this.
+requests>=2.31.0
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 python-json-logger==2.0.7       # Structured JSON log lines for CloudWatch
 

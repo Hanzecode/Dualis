@@ -244,7 +244,7 @@ Nothing is required to run the system directly on your machine (see Getting Star
 
 ### Run everything in containers (Docker Compose)
 
-The root `docker-compose.yml` runs the whole stack — the C++ engine, Wing A's Python process (including the dashboard API on port 8000), Wing B's ETL-then-score loop, and TimescaleDB:
+The root `docker-compose.yml` runs the whole stack — the C++ engine, Wing A's Python process (including the dashboard API on port 8000), Wing B's ETL-then-score loop, the React dashboard, and TimescaleDB:
 
 ```bash
 docker compose up --build
@@ -253,7 +253,7 @@ docker compose up --build
 - The C++ engine is a multi-stage build (`wing-a/docker/engine.Dockerfile`): a full toolchain image compiles it, and only the binary and its runtime libraries are copied into the final image.
 - Each container has its own filesystem, so Wing B and Wing A share the signal files through a named volume (`signals`, mounted at `/data`). Wing A reaches the engine by service name (`ZMQ_ENGINE_HOST=engine`) instead of `localhost`.
 - Secrets are read from the existing `wing-a/.env` and `wing-bb/.env`; they are not baked into any image.
-- The React dashboard is not containerized; run it on the host (`npm run dev`) and it talks to port 8000.
+- The React dashboard is the `frontend` container: nginx serves the built app and forwards `/api/*` to Wing A, so the browser only talks to one address — open **http://localhost:3000** (`FRONTEND_PORT=3100 docker compose up` to use another port; `npm run dev` also wants 3000, so stop one of them). Your Alpaca free plan allows one live stream per account, so only one running copy of Wing A (this stack *or* a cloud deployment) can receive prices at a time; the second shows the gateway as DOWN and logs `connection limit exceeded`.
 
 To run only the database (for persistence while running everything else directly): `docker compose up -d timescaledb`, then `psql postgresql://quant:quant@localhost:5434/quantcore -f wing-a/db/schema.sql`. Persistence happens in Python (`PnLTracker`); the C++ `persist_trade()` / `pg_pool.hpp` path is not wired up.
 

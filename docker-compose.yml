@@ -9,16 +9,16 @@
 # ZeroMQ between the engine and Wing A, a shared signal directory between
 # Wing B and Wing A, TimescaleDB for persistence.
 #
-# The React dashboard (wing-a/dashboard) is NOT containerized here — run it
-# on the host with `npm run dev`, pointed at http://localhost:8000, which
-# this stack exposes below.
+# The React dashboard is the `frontend` service: nginx serves the built app
+# and forwards /api/* to wing-a, so the browser only ever talks to one
+# address — open http://localhost:3000 (change with FRONTEND_PORT=...).
+# `npm run dev` in wing-a/dashboard still works separately for development,
+# but both want port 3000, so stop one or set FRONTEND_PORT.
 #
 # Usage:
 #   docker compose up --build       # build + start everything
 #   docker compose logs -f wing-a   # tail one service
 #   docker compose down -v          # stop and wipe the timescaledb volume
-
-version: "3.9"
 
 services:
 
@@ -71,6 +71,15 @@ services:
       - signals:/data
     ports:
       - "8000:8000"   # FastAPI dashboard API — point the host-run React dashboard here
+
+  # ── The React dashboard, served by nginx (wing-a/dashboard/Dockerfile) ───
+  frontend:
+    build:
+      context: ./wing-a/dashboard
+    depends_on:
+      - wing-a
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
 
   # ── Wing B: ETL once, then score on a loop (docker/entrypoint.sh) ────────
   wing-b:

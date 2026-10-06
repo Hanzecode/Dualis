@@ -7,9 +7,9 @@ variable "aws_region" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance size. t3.micro (1GB RAM, free-tier eligible on most new accounts) is what this was written for — the engine's own build is small (a couple of translation units, seconds to compile locally), so building the full stack with `docker compose up --build` on the instance itself should be fine. If it ever isn't, the fallback is building images locally and pushing them to a registry instead of building on the VM."
+  description = "EC2 instance size. t3.small (2GB RAM; whether it is covered by an AWS free tier depends on your account type, otherwise roughly 2 cents/hour) is what this was written for — the engine's own build is small (a couple of translation units, seconds to compile locally), so building the full stack with `docker compose up --build` on the instance itself should be fine. If it ever isn't, the fallback is building images locally and pushing them to a registry instead of building on the VM."
   type        = string
-  default     = "t3.micro"
+  default     = "t3.small"
 }
 
 variable "public_key_path" {

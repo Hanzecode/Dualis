@@ -60,7 +60,7 @@ export const PnLTracker: React.FC<Props> = ({ data }) => {
           plugins: {
             legend: { display: false },
             tooltip: {
-              callbacks: { label: (ctx) => `PnL: $${ctx.parsed.y.toLocaleString()}` },
+              callbacks: { label: (ctx) => `PnL: $${(ctx.parsed.y ?? 0).toLocaleString()}` },
               displayColors: false,
               bodyFont: { family: 'monospace', size: 11 },
             },

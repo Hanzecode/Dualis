@@ -119,6 +119,15 @@ class AlpacaFeed:
                     ws.send(self.WS_SUB_MSG())
             elif msg_type == "q":
                 self._handle_quote(msg)
+            elif msg_type == "error":
+                # Alpaca reports failures as {"T":"error","code":N,"msg":"..."}
+                # and then drops the socket — without this they were ignored
+                # and the feed just looked like it kept reconnecting for no reason.
+                code = msg.get("code")
+                logger.error("AlpacaFeed server error: code=%s msg=%s%s", code, msg.get("msg"),
+                             " — the free plan allows ONE stream per account; "
+                             "another process (e.g. a cloud copy of this app) "
+                             "is probably holding it" if code == 406 else "")
 
     def _handle_quote(self, msg: dict) -> None:
         """Process one quote update."""

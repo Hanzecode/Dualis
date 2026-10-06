@@ -217,7 +217,7 @@ class PnLTracker:
                     INSERT INTO trades
                         (trade_id, symbol, price_bps, quantity, realised_pnl_usd, executed_at)
                     VALUES (%s, %s, %s, %s, %s, to_timestamp(%s / 1000.0))
-                    ON CONFLICT (trade_id) DO NOTHING
+                    ON CONFLICT (trade_id, executed_at) DO NOTHING
                     """,
                     (trade_id, symbol, price_bps, qty, realised_usd, timestamp_ms)
                 )

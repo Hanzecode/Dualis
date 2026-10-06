@@ -74,7 +74,7 @@ export const OrderBook: React.FC<Props> = ({ data }) => {
   );
 };
 
-const styles: React.CSSProperties | Record<string, React.CSSProperties> = {
+const styles: Record<string, React.CSSProperties> = {
   wrapper: { fontFamily: '"DM Mono", monospace', fontSize: 11 },
   empty: { fontSize: 11, color: 'var(--color-text-tertiary, #aaa)', padding: 8 },
   colHeader: {

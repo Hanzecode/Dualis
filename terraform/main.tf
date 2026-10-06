@@ -89,7 +89,14 @@ resource "aws_instance" "this" {
 # an IP between two terminals by hand.
 resource "local_file" "ansible_inventory" {
   filename = "${path.module}/../ansible/inventory.ini"
-  content  = <<-EOT
+
+  # The provider's default is 0777. Executable would make Ansible try to run
+  # this inventory as a script, and world-writable would let any local user
+  # repoint it (Ansible then copies your .env files to whatever host it names).
+  file_permission      = "0644"
+  directory_permission = "0755"
+
+  content = <<-EOT
     [dualis]
     ${aws_instance.this.public_ip} ansible_user=ubuntu ansible_ssh_private_key_file=${replace(var.public_key_path, ".pub", "")}
   EOT
